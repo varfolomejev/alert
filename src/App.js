@@ -1,7 +1,7 @@
 import './App.css';
 import { Input, InputLabel, MenuItem, FormControl, Select, Button, CircularProgress } from '@material-ui/core';
 import { makeStyles } from '@material-ui/core/styles';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 const { ipcRenderer } = window.require('electron');
 
 const useStyles = makeStyles((theme) => ({
@@ -26,7 +26,7 @@ function App() {
     selectedMinute: undefined,
     interval: undefined,
   });
-
+  const [run, setRun] = useState(false);
   const hours = [];
   const minutes = [];
   for(let i = 1; i <= 60; i++) {
@@ -37,7 +37,6 @@ function App() {
   }
 
   ipcRenderer.on('UPDATE_SETTINGS', (event, settings) => {
-    console.log('setSettings(settings);', settings)
     setSettings(settings);
   });
 
@@ -47,9 +46,18 @@ function App() {
       selectedHour: parseInt(event.target.elements.selectedHour.value),
       selectedMinute: parseInt(event.target.elements.selectedMinute.value),
       interval: parseInt(event.target.elements.interval.value),
+      notification: {
+        title: event.target.elements.title.value,
+        description: event.target.elements.description.value,
+      }
     });
+    setRun(true);
   }
 
+  const onStopHandler = () => {
+    ipcRenderer.send('STOP');
+    setRun(false);
+  }
   return (
     <>
       {(!settings.selectedHour || !settings.selectedMinute || !settings.interval) && <CircularProgress />}
@@ -75,10 +83,23 @@ function App() {
                 <Input name='interval' type="number" defaultValue={settings.interval}/>
               </FormControl>
               <FormControl fullWidth={true} className={classes.formControl}>
+                <InputLabel>Title</InputLabel>
+                <Input name='title' type="text" defaultValue={settings.notification.title}/>
+              </FormControl>
+              <FormControl fullWidth={true} className={classes.formControl}>
+                <InputLabel>Description</InputLabel>
+                <Input name='description' type="text" defaultValue={settings.notification.description}/>
+              </FormControl>
+              {!run && <FormControl fullWidth={true} className={classes.formControl}>
                 <Button variant="contained" color="primary" type="submit">
                   Save and run
                 </Button>
-              </FormControl>
+              </FormControl>}
+              {run && <FormControl fullWidth={true} className={classes.formControl}>
+                <Button variant="contained" color="primary" type="button" onClick={onStopHandler}>
+                  Stop
+                </Button>
+              </FormControl>}
             </form>
           </header>
         </div>

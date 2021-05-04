@@ -1,24 +1,12 @@
 const path = require('path');
-const { app, BrowserWindow, Notification, ipcMain } = require('electron')
+const url = require('url');
+const { app, BrowserWindow, Notification, ipcMain, protocol } = require('electron')
 const { is } = require('electron-util');
-const CronJob = require('cron').CronJob;
-const homedir = require('os').homedir();
-const fs = require('fs');
+const settings = require('./settings');
+const ticker = require('./ticker');
 const TrayGenerator = require('./tray-generator')
-const configFilePath = `${homedir}/.alert.config.json`;
-const defaultConfig = {
-    selectedHour: 8,
-    selectedMinute: 30,
-    interval: 180,
-};
-let savedConfig = {};
-if(fs.existsSync(configFilePath)) {
-    savedConfig = JSON.parse(fs.readFileSync(configFilePath).toString());
-}
-let settings = {
-    ...defaultConfig,
-    ...savedConfig,
-};
+
+let config = settings.get();
 let mainWindow = null;
 let tray;
 let n;
@@ -28,81 +16,78 @@ const createMainWindow = () => {
     width: 800,
     height: 600,
     webPreferences: {
-        devTools: is.development,
-        nodeIntegration: true,
-        webSecurity: false
+      devTools: is.development,
+      nodeIntegration: true,
+      contextIsolation: false,
+      webSecurity: false,
     },
   });
   if (is.development) {
     mainWindow.webContents.openDevTools({ /*mode: 'detach'*/ });
-  } 
-  console.log('is.development', is.development);
-  const startURL = is.development ? 'http://localhost:3000' : `file://${path.join(__dirname, '../build/index.html')}`;
+  }
+  console.log('is.development', is.development)
+  const startURL = is.development ? 'http://localhost:3000' : url.format({
+    pathname: path.join(__dirname, "../build/index.html"),
+    protocol: 'file:',
+    slashes: true
+  });
   mainWindow.loadURL(startURL)
 };
 
 function showNotification() {
-    const notification = {
-        title: 'Basic Notification',
-        body: 'Notification from the Main process',
-        actions: [
-            {
-                text: 'Close',
-                type: 'button',
-            }
-        ],
-    }
-    n = new Notification(notification)
-    n.on('action', function() {
-        console.log('replay')
-    });
-    n.on('close', function() {
-        console.log('close')
-    });
-    n.on('click', function() {
-        console.log('click')
-    });
-    n.show()
+  const notification = {
+    title: config.notification.title,
+    body: config.notification.description,
+    actions: [
+      {
+        text: 'Close',
+        type: 'button',
+      }
+    ],
+  }
+  n = new Notification(notification)
+  n.on('action', () => { ticker.setNextTick.call(ticker); });
+  n.on('close', () => { ticker.setNextTick.call(ticker); });
+  n.on('click', () => { ticker.setNextTick.call(ticker); });
+  n.show()
 }
 
 app.on('ready', () => {
-    console.log('ready');
-    createMainWindow();
-    tray = new TrayGenerator(mainWindow);
-    tray.createTray();
-
-    ipcMain.on('SAVE_SETTINGS_AND_RUN', (event, data) => {
-        if(data.selectedHour !== settings.selectedHour || data.selectedMinute !== settings.selectedMinute || data.interval !== settings.interval) {
-            // save new settings
-        }
-        // run
-    });
-
-    
-    mainWindow.webContents.on('did-finish-load', () => {
-        console.log('settings', settings)
-        mainWindow.webContents.send('UPDATE_SETTINGS', settings);
-    });
+  protocol.interceptFileProtocol('file', (request, callback) => {
+    const url = request.url.substr(7)    /* all urls start with 'file://' */
+    callback({ path: path.normalize(`${__dirname}/${url}`) })
+  }, (err) => {
+    if (err) console.error('Failed to register protocol')
+  })
+  createMainWindow();
+  tray = new TrayGenerator(mainWindow);
+  tray.createTray();
+  ipcMain.on('SAVE_SETTINGS_AND_RUN', (event, data) => {
+    if (
+      data.selectedHour !== config.selectedHour ||
+      data.selectedMinute !== config.selectedMinute ||
+      data.interval !== config.interval ||
+      data.notification.title !== config.notification.title ||
+      data.notification.description !== config.notification.description
+    ) {
+      settings.save(data, (err) => {
+        console.log('New config saved');
+      })
+    }
+    ticker.run(data, showNotification);
+  });
+  ipcMain.on('STOP', (event, data) => {
+    ticker.stop();
+  });
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.send('UPDATE_SETTINGS', config);
+  });
 });
 
 app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit()
-    }
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
 })
 
-// app.on('activate', () => {
-//     if (BrowserWindow.getAllWindows().length === 0) {
-//         createWindow()
-//     }
-// })
-
 app.dock.hide();
-
-//mainWindow.webContents.send('MSG_FROM_MAIN', 'hello renderer');
-
-// var job = new CronJob('*/10 * * * * *', function() {
-//     console.log('You will see this message every second');
-//     // showNotification();
-// });
-// job.start();
